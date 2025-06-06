@@ -3,6 +3,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Int32
 import numpy as np
+import tf2_ros
 
 class AlignToMarker(Node):
 
@@ -13,6 +14,9 @@ class AlignToMarker(Node):
         self.timer_period = 0.1
         self.timer = self.create_timer(self.timer_period, self.alignment)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.k_lin = 0.2  # Linear gain
         self.k_ang = 0.5  # Angular gain
@@ -32,7 +36,7 @@ class AlignToMarker(Node):
 
         twist = Twist()
 
-        if self.aruco_number == 8:
+        try:
 
             now = rclpy.time.Time()
             trans = self.tf_buffer.lookup_transform('base_link', ('aruco_' + str(self.aruco_number)), now)
@@ -42,26 +46,35 @@ class AlignToMarker(Node):
 
             distance = np.sqrt(dx ** 2 + dy ** 2)
             angle = np.arctan2(dy, dx)
-            
-            if abs(dy) > self.dist_threshold:
 
-                twist.linear.x = self.k_lin * abs(dy)
+            self.get_logger().info(f"Dy: {dy} | Angle: {angle}")
 
-            else: 
+            if self.aruco_number == 8:
 
-                twist.linear.x = 0.0
-                self.get_logger().info("Aligned in y-axis!")
+                
+                if abs(dy) > self.dist_threshold:
 
-            if abs(angle) > self.ang_threshold:
+                    twist.linear.x = self.k_lin * abs(dy)
 
-                twist.angular.z = self.k_ang * angle
+                else: 
 
-            else:
+                    twist.linear.x = 0.0
+                    self.get_logger().info("Aligned in y-axis!")
 
-                twist.angular.z = 0.0
-                self.get_logger().info("Angle aligned!")
+                if abs(angle) > self.ang_threshold:
 
-            self.cmd_pub.publish(twist)
+                    twist.angular.z = self.k_ang * angle
+
+                else:
+
+                    twist.angular.z = 0.0
+                    self.get_logger().info("Angle aligned!")
+
+                self.cmd_pub.publish(twist)
+
+        except Exception as e:
+
+            self.get_logger().warn(f'No transform found: {e}')
 
 def main(args=None):
 
