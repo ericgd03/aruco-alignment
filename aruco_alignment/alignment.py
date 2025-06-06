@@ -28,15 +28,18 @@ class AlignToMarker(Node):
         self.angle_error = 0
         self.aruco_number = 0
 
+        self.state == "ALIGN"
+        self.current_angle = 0.0
+
     def aruco_number_callback(self, msg):
 
         self.aruco_number = msg.data
 
     def alignment(self):
 
-        twist = Twist()
-
         try:
+
+            twist = Twist()
 
             now = rclpy.time.Time()
             trans = self.tf_buffer.lookup_transform('base_link', ('aruco_' + str(self.aruco_number)), now)
@@ -47,30 +50,57 @@ class AlignToMarker(Node):
             distance = np.sqrt(dx ** 2 + dy ** 2)
             angle = np.arctan2(dy, dx)
 
-            self.get_logger().info(f"Dy: {dy} | Angle: {angle}")
+            # self.get_logger().info(f"Dy: {dy} | Angle: {angle}")
 
-            if self.aruco_number == 8:
+            if self.state == "ALIGN":
 
-                
-                if abs(dy) > self.dist_threshold:
+                if self.aruco_number == 8:
 
-                    twist.linear.x = self.k_lin * abs(dy)
+                    if abs(dy) > self.dist_threshold:
 
-                else: 
+                        twist.linear.x = self.k_lin * abs(dy)
 
-                    twist.linear.x = 0.0
-                    self.get_logger().info("Aligned in y-axis!")
+                    if abs(angle) > self.ang_threshold:
 
-                if abs(angle) > self.ang_threshold:
+                        twist.angular.z = self.k_ang * angle
 
-                    twist.angular.z = self.k_ang * angle
+                    if abs(dy) < self.dist_threshold and abs(angle) > self.ang_threshold:
+
+                        twist.linear.x = 0.0
+                        twist.angular.z = 0.0
+                        self.state = "TURN"
+                        self.get_logger().info("Alignment done. Passing to TURN state.")
+
+            elif self.state == "TURN":
+
+                if self.current_angle < np.pi:
+
+                    twist.angular.z = 0.1
+                    self.current_angle += 0.1 * self.timer_period
 
                 else:
 
                     twist.angular.z = 0.0
-                    self.get_logger().info("Angle aligned!")
+                    self.current_angle = 0.0
+                    self.state = "FORWARD"
+                    self.get_logger().info("Turn done. Passing to FORWARD state.")
 
-                self.cmd_pub.publish(twist)
+            elif self.state == "FORWARD":
+
+                if distance > self.dist_threshold:
+
+                    twist.linear.x = self.k_lin * distance
+
+                else:
+
+                    twist.linear.x = 0.0
+                    self.get_logger().info("Distance achieved. Robot stopping.")
+
+            else:
+
+                self.get_logger().info("ERROR: State failure!")
+
+            self.cmd_pub.publish(twist)
 
         except Exception as e:
 
